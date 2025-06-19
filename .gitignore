@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pdb
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.log
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test and coverage
+.coverage
+.tox/
+.pytest_cache/
+htmlcov/
+
+# Misc
+*.bak
+*.tmp
+*.orig
+*.old
+*.sqlite3
+*.db
+
+# keys
+client/tools/keys/*
+client/tools/salts/*

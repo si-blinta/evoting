@@ -1,0 +1,41 @@
+Server client TLS
+Client requests all the public lists
+Client requests the elligbility 
+
+
+TODO: add the signature when comitting because if not everyone can commit because its public  and sequence number + signed sequence
+
+
+
+
+
+TODO : handle commit packets 
+
+
+
+Tools : 
+commits_list
+reveal_list
+
+
+
+ALGO:
+    FILTER BAD SIGNATURE (NOT ALLOWED TO VOTE OR FAKE VOTE)
+    FILTER UNVALID COMMIT HASH SIGNATURE 
+    FILTER THE LAST COMMITS FOR EACH VOTER ( check if the sequence is valid )
+    FILTER REVEAL + COUNT
+
+
+
+
+
+
+
+
+TODO: 
+
+
+    Modifier handler dans server pourqu'il ignore les headers des packets.
+    Debugger le count 
+    Ajouter le hash du C|S avant de le signer (modification coté REVEAL et coté serveur du coup)
+    Ajouter verify reveal signature aussi
