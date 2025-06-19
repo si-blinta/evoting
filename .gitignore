@@ -44,3 +44,4 @@ htmlcov/
 # keys
 client/tools/keys/*
 client/tools/salts/*
+client/tools/wallet*

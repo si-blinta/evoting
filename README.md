@@ -1,0 +1,2 @@
+python3 client/tools/votemanager.py client/tools/wallet.json init # allows you to generate pub/priv keys
+python3 client/tools/votemanager.py client/tools/wallet.json commit # allows you to prepare your commit in your wallet

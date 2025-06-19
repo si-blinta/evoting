@@ -1,13 +1,21 @@
+import logging
 from .data import candidates, voters, eligibility_requests, commits, confidential_voters, reveals
 from .state import ServerState, COMMIT, REVEAL, ENDED
 from cryptography.hazmat.primitives import serialization
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
 import hashlib
 from Crypto.PublicKey import RSA
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
+
+# --- Logging setup ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
+logger = logging.getLogger("server")
+
 PRIVATE_KEY_PATH = "server/key.pem"
 
 def load_server_pubkey(cert_path):
@@ -44,9 +52,9 @@ def handle_client(conn, addr, server_state: ServerState):
             if not data:
                 break
             packet = data.decode().strip()
-            print(f"[client {addr[0]}:{addr[1]}] {packet}")
+            logger.info(f"[client {addr[0]}:{addr[1]}] {packet}")
 
-            response = "Unknown or malformed request.\n"  # Default response
+            response = None  # Default to None, set below
 
             # List requests (work in all states)
             if packet == "LC":
@@ -61,29 +69,45 @@ def handle_client(conn, addr, server_state: ServerState):
                 response = f"Reveals: {reveals}\n"
             elif packet == "COUNT":
                 results = count_votes(commits, reveals, "server/cert.pem")
-                print(results)
+                logger.info(f"Vote count results: {results}")
+                response = f"Vote counts: {results}\n"
             else:
                 state = server_state.get_state()
-                if state == ENDED:
-                    response = "Voting session ended. No further requests accepted.\n"
-                elif state == COMMIT:
-                    if packet.startswith("E|"):
+                # State-specific packet handling
+                if packet.startswith("E|"):
+                    if state != COMMIT:
+                        response = "ERROR|Eligibility requests are only allowed in COMMIT state.\n"
+                    else:
                         response = handle_eligibility_state(packet)
-                    elif packet.startswith("C|"):
+                elif packet.startswith("C|"):
+                    if state != COMMIT:
+                        response = "ERROR|Commit requests are only allowed in COMMIT state.\n"
+                    else:
                         response = handle_commit_state(packet)
-                elif state == REVEAL:
-                    if packet.startswith("R|"):
+                elif packet.startswith("R|"):
+                    if state != REVEAL:
+                        response = "ERROR|Reveal requests are only allowed in REVEAL state.\n"
+                    else:
                         response = handle_reveal_state(packet)
+                elif state == ENDED:
+                    response = "ERROR|Voting session ended. No further requests accepted.\n"
+                else:
+                    response = "ERROR|Unknown command or not allowed in current state.\n"
+
+            if response is None:
+                response = "ERROR|Malformed packet or unknown request.\n"
 
             conn.sendall(response.encode())
     finally:
+        logger.info(f"Connection with {addr[0]}:{addr[1]} closed.")
         conn.close()
 
 def handle_eligibility_state(packet):
     try:
-        _, user_id, blinded_pubkey= packet.split('|', 2)
+        _, user_id, blinded_pubkey = packet.split('|', 2)
         voter_info = confidential_voters.get(user_id)
         if not voter_info:
+            logger.warning(f"Eligibility request for unauthorized ID: {user_id}")
             return "ERROR|Non authorized ID\n"
         blinded_bytes = bytes.fromhex(blinded_pubkey)
         signature = rsa_sign_raw(blinded_bytes, d, n)
@@ -92,19 +116,22 @@ def handle_eligibility_state(packet):
             'lastname': voter_info['lastname'],
             'birthdate': voter_info['birthdate']
         })
+        logger.info(f"Eligibility granted for ID: {user_id}")
         return f"OK|{signature.hex()}\n"
     except Exception as e:
+        logger.error(f"Eligibility request failed: {e}")
         return f"ERROR|Malformed packet or signing failed: {e}\n"
     return "Command not allowed in ELIGIBILITY state.\n"
 
 def handle_commit_state(packet):
     commits.append(packet)
+    logger.info("Commit received and stored.")
     return f"OK\n"
 
 def handle_reveal_state(packet):
     reveals.append(packet)
+    logger.info("Reveal received and stored.")
     return f"OK\n"
-
 
 def verify_server_signature_from_packet(packet, cert_server_path):
     try:
@@ -148,24 +175,19 @@ def verify_sequence_signature_from_packet(packet):
         pubkey_hex = fields[0]
         seq_bytes_hex = fields[2]
         signedseq_hex = fields[3]
-        
         modulus = int(pubkey_hex, 16)
         exponent = 65537
         public_key = RSA.construct((modulus, exponent))
         signature_int = int(signedseq_hex, 16)
         recovered_int = pow(signature_int, public_key.e, public_key.n)
-        
         seq_bytes = bytes.fromhex(seq_bytes_hex)
-        # Compute the hash of the sequence bytes.
         seq_hash = SHA256.new(seq_bytes).digest()
         expected_int = int.from_bytes(seq_hash, 'big')
-        
         return recovered_int == expected_int
     except (ValueError, TypeError):
         return False
 
 def verify_reveal_signature_from_packet(packet):
-
     fields = packet.split("|")
     if len(fields) < 5:
         return False
@@ -173,146 +195,103 @@ def verify_reveal_signature_from_packet(packet):
     candidate_bytes_hex = fields[2]
     salt_hex = fields[3]
     signed_data_hex = fields[4]
-
-    # Recompute the hash of candidate_bytes + salt_bytes
     candidate_bytes = bytes.fromhex(candidate_bytes_hex)
     salt_bytes = bytes.fromhex(salt_hex)
-
     data_hash = hashlib.sha256(candidate_bytes + salt_bytes).digest()
     expected_int = int.from_bytes(data_hash, 'big')
-
     modulus = int(pubkey_hex, 16)
     exponent = 65537
     public_key = RSA.construct((modulus, exponent))
     signature_int = int(signed_data_hex, 16)
     recovered_int = pow(signature_int, public_key.e, public_key.n)
-
     return recovered_int == expected_int
 
-import hashlib
-import logging
-
 def count_votes(commits_list, reveal_list, cert_server_path):
-    logging.debug("Starting count_votes")
+    logger.info("Starting vote counting process.")
     valid_commits = {}  # Mapping: voter (pubkey_hex) -> (sequence, commit_packet)
-    
-    # Process commit packets.
     for idx, original_packet in enumerate(commits_list):
-        logging.debug(f"Processing commit packet #{idx + 1}: {original_packet}")
+        logger.debug(f"Processing commit packet #{idx + 1}: {original_packet}")
         packet = original_packet[2:]  # Remove header
-        logging.debug(f"Commit packet after header removal: {packet}")
-            
-        # Verify all signatures.
+        logger.debug(f"Commit packet after header removal: {packet}")
         if not verify_server_signature_from_packet(packet, cert_server_path):
-            logging.debug(f"Commit packet #{idx + 1}: Server signature verification failed.")
+            logger.warning(f"Commit packet #{idx + 1}: Server signature verification failed.")
             continue
-        else:
-            logging.debug(f"Commit packet #{idx + 1}: Server signature verified.")
-            
         if not verify_commit_signature_from_packet(packet):
-            logging.debug(f"Commit packet #{idx + 1}: Commit signature verification failed.")
+            logger.warning(f"Commit packet #{idx + 1}: Commit signature verification failed.")
             continue
-        else:
-            logging.debug(f"Commit packet #{idx + 1}: Commit signature verified.")
-            
         if not verify_sequence_signature_from_packet(packet):
-            logging.debug(f"Commit packet #{idx + 1}: Sequence signature verification failed.")
+            logger.warning(f"Commit packet #{idx + 1}: Sequence signature verification failed.")
             continue
-        else:
-            logging.debug(f"Commit packet #{idx + 1}: Sequence signature verified.")
         fields = packet.split("|")
         if len(fields) < 6:
-            logging.debug(f"Commit packet #{idx + 1}: Insufficient fields ({len(fields)}). Skipping.")
+            logger.warning(f"Commit packet #{idx + 1}: Insufficient fields ({len(fields)}). Skipping.")
             continue
-        
         voter = fields[0]
         try:
             seq = int(fields[2], 16)
-            logging.debug(f"Commit packet #{idx + 1}: Voter: {voter}, Sequence: {seq}.")
+            logger.debug(f"Commit packet #{idx + 1}: Voter: {voter}, Sequence: {seq}.")
         except ValueError:
-            logging.debug(f"Commit packet #{idx + 1}: Invalid sequence value. Skipping.")
+            logger.warning(f"Commit packet #{idx + 1}: Invalid sequence value. Skipping.")
             continue
-        
-        # For each voter, keep the commit with the highest sequence.
         if voter not in valid_commits or seq > valid_commits[voter][0]:
-            logging.debug(f"Commit packet #{idx + 1}: Updating valid commit for voter {voter}.")
+            logger.debug(f"Commit packet #{idx + 1}: Updating valid commit for voter {voter}.")
             valid_commits[voter] = (seq, packet)
         else:
-            logging.debug(f"Commit packet #{idx + 1}: Not the highest sequence for voter {voter}.")
-    
+            logger.debug(f"Commit packet #{idx + 1}: Not the highest sequence for voter {voter}.")
     vote_counts = {}
-    # Build a set of valid candidate ids from the candidate table.
     valid_candidate_ids = {candidate['id'] for candidate in candidates}
-    logging.debug(f"Valid candidate IDs: {valid_candidate_ids}")
-    
-    # Process reveal packets.
+    logger.debug(f"Valid candidate IDs: {valid_candidate_ids}")
+    revealed_voters = set()  # Track voters who have already had a valid reveal counted
     for idx, original_packet in enumerate(reveal_list):
-        logging.debug(f"Processing reveal packet #{idx + 1}: {original_packet}")
+        logger.debug(f"Processing reveal packet #{idx + 1}: {original_packet}")
         packet = original_packet[2:]  # Remove header
-        logging.debug(f"Reveal packet after header removal: {packet}")
-        
+        logger.debug(f"Reveal packet after header removal: {packet}")
         fields = packet.split("|")
         if len(fields) < 5:
-            logging.debug(f"Reveal packet #{idx + 1}: Insufficient fields ({len(fields)}). Skipping.")
+            logger.warning(f"Reveal packet #{idx + 1}: Insufficient fields ({len(fields)}). Skipping.")
             continue
-        
         voter = fields[0]
+        if voter in revealed_voters:
+            logger.info(f"Reveal packet #{idx + 1}: Voter {voter} already had a valid reveal counted. Skipping.")
+            continue
         candidate_bytes_hex = fields[2]
         salt_hex = fields[3]
-        logging.debug(f"Reveal packet #{idx + 1}: Voter: {voter}, Candidate Hex: {candidate_bytes_hex}, Salt Hex: {salt_hex}.")
-        
+        logger.debug(f"Reveal packet #{idx + 1}: Voter: {voter}, Candidate Hex: {candidate_bytes_hex}, Salt Hex: {salt_hex}.")
         if not verify_reveal_signature_from_packet(packet):
-            logging.debug(f"Reveal packet #{idx + 1}: Reveal signature verification failed.")
+            logger.warning(f"Reveal packet #{idx + 1}: Reveal signature verification failed.")
             continue
-        else:
-            logging.debug(f"Reveal packet #{idx + 1}: Reveal signature verified.")
-        
-        # Only process if there is a valid commit for this voter.
         if voter not in valid_commits:
-            logging.debug(f"Reveal packet #{idx + 1}: No valid commit found for voter {voter}.")
+            logger.warning(f"Reveal packet #{idx + 1}: No valid commit found for voter {voter}.")
             continue
-        
-        # For the commit hash verification, we need to recompute the hash.
         try:
             candidate_bytes = bytes.fromhex(candidate_bytes_hex)
             salt_bytes = bytes.fromhex(salt_hex)
-            logging.debug(f"Reveal packet #{idx + 1}: Converted candidate bytes and salt bytes successfully.")
+            logger.debug(f"Reveal packet #{idx + 1}: Converted candidate bytes and salt bytes successfully.")
         except Exception as e:
-            logging.debug(f"Reveal packet #{idx + 1}: Conversion error: {e}. Skipping.")
+            logger.warning(f"Reveal packet #{idx + 1}: Conversion error: {e}. Skipping.")
             continue
-        
-        # Recompute the commit hash.
         computed_hash = hashlib.sha256(candidate_bytes + salt_bytes).hexdigest()
-        logging.debug(f"Reveal packet #{idx + 1}: Computed hash: {computed_hash}")
-        
-        # Retrieve the commit hash from the valid commit packet.
+        logger.debug(f"Reveal packet #{idx + 1}: Computed hash: {computed_hash}")
         commit_fields = valid_commits[voter][1].split("|")
         if len(commit_fields) < 6:
-            logging.debug(f"Reveal packet #{idx + 1}: Valid commit for voter {voter} has insufficient fields. Skipping.")
+            logger.warning(f"Reveal packet #{idx + 1}: Valid commit for voter {voter} has insufficient fields. Skipping.")
             continue
         commit_hash_hex = commit_fields[4]
-        logging.debug(f"Reveal packet #{idx + 1}: Commit hash from commit packet: {commit_hash_hex}")
-        
-        # Only count this reveal if the computed hash equals the commit hash.
+        logger.debug(f"Reveal packet #{idx + 1}: Commit hash from commit packet: {commit_hash_hex}")
         if computed_hash != commit_hash_hex:
-            logging.debug(f"Reveal packet #{idx + 1}: Hash mismatch. Computed: {computed_hash}, Expected: {commit_hash_hex}. Skipping.")
+            logger.warning(f"Reveal packet #{idx + 1}: Hash mismatch. Computed: {computed_hash}, Expected: {commit_hash_hex}. Skipping.")
             continue
-        
         try:
-            # Convert the candidate id from hex to integer.
             candidate_id = int(candidate_bytes_hex, 16)
-            logging.debug(f"Reveal packet #{idx + 1}: Candidate ID (integer): {candidate_id}")
+            logger.debug(f"Reveal packet #{idx + 1}: Candidate ID (integer): {candidate_id}")
         except ValueError:
-            logging.debug(f"Reveal packet #{idx + 1}: Invalid candidate_id value. Skipping.")
+            logger.warning(f"Reveal packet #{idx + 1}: Invalid candidate_id value. Skipping.")
             continue
-        
-        # Count the vote only if the candidate id exists in the candidate table.
         if candidate_id not in valid_candidate_ids:
-            logging.debug(f"Reveal packet #{idx + 1}: Candidate ID {candidate_id} not in valid candidates. Skipping.")
+            logger.warning(f"Reveal packet #{idx + 1}: Candidate ID {candidate_id} not in valid candidates. Skipping.")
             continue
-        
         vote_counts[candidate_id] = vote_counts.get(candidate_id, 0) + 1
-        logging.debug(f"Reveal packet #{idx + 1}: Vote counted for candidate {candidate_id}. Total now: {vote_counts[candidate_id]}")
-    
-    logging.debug(f"Final vote counts: {vote_counts}")
+        revealed_voters.add(voter)
+        logger.info(f"Reveal packet #{idx + 1}: Vote counted for candidate {candidate_id}. Total now: {vote_counts[candidate_id]}")
+    logger.info(f"Final vote counts: {vote_counts}")
     return vote_counts
