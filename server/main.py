@@ -1,3 +1,5 @@
+import eventlet
+eventlet.monkey_patch()
 import socket
 import ssl
 import threading
@@ -9,7 +11,13 @@ PORT = 8443
 CERT = 'server/cert.pem'
 KEY = 'server/key.pem'
 
+from .bulletin import socketio, app
+def start_bulletin():
+    socketio.run(app, host="0.0.0.0", port=5000)
+
 def main():
+    threading.Thread(target=start_bulletin, daemon=True).start()
+    print("Bulletin board running at http://localhost:5000")
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(certfile=CERT, keyfile=KEY)
     server_state = ServerState() 
