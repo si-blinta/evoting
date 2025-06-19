@@ -1,6 +1,6 @@
 import threading
 import time
-
+import logging
 COMMIT = "COMMIT"
 REVEAL = "REVEAL"
 ENDED = "ENDED"
@@ -9,9 +9,16 @@ STATE_SEQUENCE = [COMMIT, REVEAL, ENDED]
 
 # Time (seconds) for each state
 STATE_DURATIONS = {
-    COMMIT: 30,       # 10 minute
+    COMMIT: 120,       # 10 minute
     REVEAL: 600,       # 10 minute
 }
+
+# --- Logging setup ---
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s"
+)
+logger = logging.getLogger("server")
 
 class ServerState:
     def __init__(self):
@@ -27,6 +34,7 @@ class ServerState:
                 with self.lock:
                     if self.state == state:
                         idx = STATE_SEQUENCE.index(state)
+                        logger.info(f"{self.state} state ended, transitioning to {STATE_SEQUENCE[idx + 1]}")
                         self.state = STATE_SEQUENCE[idx + 1]
                         self.state_start_time = time.time()
             # After all, set to ENDED

@@ -4,6 +4,7 @@ import base64
 import getpass
 import hashlib
 import logging
+import argparse
 from Crypto.PublicKey import RSA
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -118,7 +119,7 @@ class Wallet:
         self.set("sequence", seq)
 
     def get_sequence(self):
-        return self.get("sequence")
+        return self.data.get("sequence", None)
 
     def set_signed_sequence(self, sig_hex):
         self.set("signed_sequence", sig_hex)
@@ -223,7 +224,7 @@ def verify_signed_pubkey(wallet):
     logger.info(f"Signed public key verification: {valid}")
     return valid
 
-def mode_init(wallet):
+def mode_init(wallet, passphrase=None):
     # Generate keys and blinded pubkey
     server_n, server_e = load_server_pubkey("client/cert.pem")
     key = RSA.generate(2048)
@@ -232,7 +233,8 @@ def mode_init(wallet):
     wallet.set_private_key(key.export_key(pkcs=8, protection="scryptAndAES128-CBC"))
     wallet.set_public_key(pubkey_hex)
 
-    passphrase = getpass.getpass("Enter a passphrase for blinding: ")
+    if passphrase is None:
+        passphrase = getpass.getpass("Enter a passphrase for blinding: ")
     pubkey_bytes = pubkey.n.to_bytes((pubkey.n.bit_length() + 7) // 8, 'big')
     pubkey_hash = int.from_bytes(hashlib.sha256(pubkey_bytes).digest(), 'big')
     r = generate_r_from_passphrase(passphrase, server_n)
@@ -261,10 +263,12 @@ def mode_sign(wallet, signed_blinded_hex=None):
     assert verify_signed_pubkey(wallet), "Server signature on public key is invalid!"
     logger.info("Server signature on public key is valid.")
 
-
-def mode_commit(wallet):
+def mode_commit(wallet, candidate=None, passphrase=None):
     wallet.load()
-    candidate = int(input("Enter candidate (integer): ").strip())
+    if candidate is None:
+        candidate = int(input("Enter candidate (integer): ").strip())
+    if passphrase is None:
+        passphrase = input("Enter passphrase for salt: ").strip()
     # Sequence management
     seq = wallet.get_sequence()
     if seq is None:
@@ -272,7 +276,6 @@ def mode_commit(wallet):
     else:
         seq = int(seq) + 1
     logger.info(f"Using sequence number: {seq}")
-    passphrase = input("Enter passphrase for salt: ").strip()
     salt_bytes = get_salt_from_passphrase(passphrase)
     salt_hex = salt_bytes.hex()
     wallet.set_candidate(candidate)
@@ -299,19 +302,23 @@ def mode_commit(wallet):
 
 def main():
     import sys
-    if len(sys.argv) < 3:
-        print("Usage: python votemanager.py <wallet.json> <mode>")
-        print("Modes: init | commit")
-        return
-    wallet_path = sys.argv[1]
-    mode = sys.argv[2]
-    wallet = Wallet(wallet_path)
-    if mode == "init":
-        mode_init(wallet)
-    elif mode == "commit":
-        mode_commit(wallet)
+    parser = argparse.ArgumentParser(description="Evoting Wallet Manager")
+    parser.add_argument("wallet", help="Path to wallet JSON file")
+    parser.add_argument("mode", choices=["init", "commit", "sign"], help="Mode: init | commit | sign")
+    parser.add_argument("--passphrase", help="Passphrase for blinding or salt")
+    parser.add_argument("--candidate", type=int, help="Candidate (integer, for commit)")
+    parser.add_argument("--signed-blinded", help="Server's signature on blinded hash (for sign)")
+    args = parser.parse_args()
+
+    wallet = Wallet(args.wallet)
+    if args.mode == "init":
+        mode_init(wallet, passphrase=args.passphrase)
+    elif args.mode == "commit":
+        mode_commit(wallet, candidate=args.candidate, passphrase=args.passphrase)
+    elif args.mode == "sign":
+        mode_sign(wallet, signed_blinded_hex=args.signed_blinded)
     else:
-        print("Unknown mode.")
+        logger.error("Unknown mode.")
 
 if __name__ == "__main__":
     main()
