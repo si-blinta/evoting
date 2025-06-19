@@ -243,7 +243,6 @@ def mode_init(wallet):
     wallet.set_blinded_hash(hex(blinded))
     wallet.save()
     logger.info(f"Wallet initialized and saved to {wallet.path}")
-    print("Now run with 'sign' mode after you get the server's signature on the blinded hash.")
 
 def mode_sign(wallet, signed_blinded_hex=None):
     wallet.load()
@@ -266,7 +265,13 @@ def mode_sign(wallet, signed_blinded_hex=None):
 def mode_commit(wallet):
     wallet.load()
     candidate = int(input("Enter candidate (integer): ").strip())
-    seq = int(input("Enter sequence number (integer): ").strip())
+    # Sequence management
+    seq = wallet.get_sequence()
+    if seq is None:
+        seq = 1
+    else:
+        seq = int(seq) + 1
+    logger.info(f"Using sequence number: {seq}")
     passphrase = input("Enter passphrase for salt: ").strip()
     salt_bytes = get_salt_from_passphrase(passphrase)
     salt_hex = salt_bytes.hex()
@@ -290,7 +295,7 @@ def mode_commit(wallet):
     # Verify signatures
     assert verify_commit_signature_from_wallet(wallet), "Commit or sequence signature is invalid!"
     logger.info("Commit and sequence signatures are valid.")
-    logger.info(f"Vote committed and wallet updated: {wallet.path}")
+    logger.info(f"Commit stored in wallet : {wallet.path}")
 
 def main():
     import sys
