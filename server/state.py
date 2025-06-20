@@ -9,7 +9,7 @@ STATE_SEQUENCE = [COMMIT, REVEAL, ENDED]
 
 # Time (seconds) for each state
 STATE_DURATIONS = {
-    COMMIT: 120,       # 10 minute
+    COMMIT: 60,       # 10 minute
     REVEAL: 600,       # 10 minute
 }
 

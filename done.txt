@@ -4,3 +4,12 @@ Solution: add the sequence number to the commit hash => (C|S|seq)
 when verifiying:
 check if H(C|S|seq) == seq 
 ou peut etre une seule signature qui regroupe tout ! 
+
+
+
+Add elligbility state: DO not allow commits
+Add commit state: Do not allow elligibility requests
+add Counting state: Do not accept any requests (ENDED state) show results on builtin board, allow users to get the csv for example .
+
+Remove the blinding factor from the wallet ! 
+
