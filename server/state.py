@@ -12,7 +12,7 @@ STATE_SEQUENCE = [ELLIGIBILITY,COMMIT, REVEAL, ENDED]
 STATE_DURATIONS = {
     ELLIGIBILITY: 60,
     COMMIT: 60,      
-    REVEAL: 600,       
+    REVEAL: 60,       
 }
 
 # --- Logging setup ---
@@ -42,6 +42,10 @@ class ServerState:
             # After all, set to ENDED
             with self.lock:
                 self.state = ENDED
+                from .handler import count_votes
+                from .data import commits, reveals
+                results = count_votes(commits, reveals, "server/cert.pem")
+                logger.info(f"Vote count results: {results}")
         threading.Thread(target=advance_state, daemon=True).start()
 
     def get_state(self):

@@ -6,8 +6,8 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 import hashlib
 from Crypto.PublicKey import RSA
-from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
+from collections import OrderedDict 
 # --- Logging setup ---
 logging.basicConfig(
     level=logging.INFO,
@@ -66,10 +66,6 @@ def handle_client(conn, addr, server_state: ServerState):
                 response = f"Commits: {commits}\n"
             elif packet == "LR":
                 response = f"Reveals: {reveals}\n"
-            elif packet == "COUNT": # todo THIS IS A PLACEHOLDER FOR NOW
-                results = count_votes(commits, reveals, "server/cert.pem")
-                logger.info(f"Vote count results: {results}")
-                response = f"Vote counts: {results}\n"
             else:
                 state = server_state.get_state()
 
@@ -208,6 +204,10 @@ def verify_reveal_signature_from_packet(packet):
 
 def count_votes(commits_list, reveal_list, cert_server_path):
     logger.info("Starting vote counting process.")
+    if not commits_list or not reveal_list:
+        candidate_id_to_name = {c['id']: f"{c['name']} {c['lastname']}" for c in candidates}
+        # Option 1: Return all candidates with 0 votes
+        return {name: 0 for name in candidate_id_to_name.values()}
     valid_commits = {}  # Mapping: voter (pubkey_hex) -> (sequence, commit_packet)
     for idx, original_packet in enumerate(commits_list):
         logger.debug(f"Processing commit packet #{idx + 1}: {original_packet}")
@@ -294,4 +294,12 @@ def count_votes(commits_list, reveal_list, cert_server_path):
         revealed_voters.add(voter)
         logger.info(f"Reveal packet #{idx + 1}: Vote counted for candidate {candidate_id}. Total now: {vote_counts[candidate_id]}")
     logger.info(f"Final vote counts: {vote_counts}")
-    return vote_counts
+    candidate_id_to_name = {c['id']: f"{c['name']} {c['lastname']}" for c in candidates}
+    sorted_items = sorted(
+        ((candidate_id_to_name.get(cid, str(cid)), count) for cid, count in vote_counts.items()),
+        key=lambda item: item[1],
+        reverse=True
+    )
+    result_with_names = {name: count for name, count in sorted_items}
+    return result_with_names
+    

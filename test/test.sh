@@ -9,7 +9,7 @@ CAND_MIN=1
 CAND_MAX=5
 PASSPHRASE="testpass"
 WAIT_BEFORE_COMMIT=60  # seconds
-WAIT_BEFORE_REVEAL=60  # seconds
+WAIT_BEFORE_REVEAL=20  # seconds
 WAIT_BEFORE_COUNT=1     # seconds
 WALLET_PREFIX="test/wallet"
 CLIENT_ID_PREFIX="ID100"
@@ -62,14 +62,6 @@ for i in $(seq 1 $NUM_CLIENTS); do
     echo "Revealing for $WALLET"
     python3 -m client.main "$WALLET" reveal
 done
-
-echo
-echo "Waiting $WAIT_BEFORE_COUNT seconds before count..."
-sleep $WAIT_BEFORE_COUNT
-
-echo
-echo "=== Counting votes... ==="
-python3 -m client.main "${WALLET_PREFIX}1.json" count
 
 echo
 echo "==== SUMMARY ===="

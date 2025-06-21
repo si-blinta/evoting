@@ -3,9 +3,6 @@ from flask_socketio import SocketIO
 import threading
 import time
 from .data import candidates, voters, eligibility_requests, commits, reveals
-from .state import ServerState
-
-server_state = ServerState()
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode='eventlet')
 
@@ -17,6 +14,29 @@ TEMPLATE = """
 <title>Evoting Bulletin Board</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.min.js"></script>
 <style>
+    #results-box {
+        background: #e3f6e3;
+        border: 2px solid #4caf50;
+        border-radius: 10px;
+        padding: 24px 32px;
+        margin: 32px auto 0 auto;
+        max-width: 420px;
+        font-size: 1.15em;
+        box-shadow: 0 2px 12px #0001;
+        text-align: center;
+    }
+    #results-box h2 {
+        color: #388e3c;
+        margin-top: 0;
+    }
+    #results-box table {
+        margin: 0 auto;
+        border-collapse: collapse;
+    }
+    #results-box th, #results-box td {
+        padding: 6px 16px;
+        border-bottom: 1px solid #b2dfdb;
+    }
 body { font-family: 'Segoe UI', Arial, sans-serif; background: #f4f6fa; margin: 0; }
 h1 { background: #2d5be3; color: #fff; margin: 0; padding: 24px 0; text-align: center; }
 #board { max-width: 950px; margin: 32px auto; display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; }
@@ -40,6 +60,7 @@ h1 { background: #2d5be3; color: #fff; margin: 0; padding: 24px 0; text-align: c
 <body>
 <h1>Evoting Bulletin Board</h1>
 <div id="state-timer" style="text-align:center;font-size:1.3em;margin:18px 0 0 0;"></div>
+<div id="results-box" style="display:none"></div>
 <div id="board"></div>
 <script>
 // Utility: copy to clipboard
@@ -157,6 +178,28 @@ function startCountdown(state, timeLeft) {
 }
 
 function renderBoard(data) {
+    // Show results if voting ended
+if (data.state === "ENDED" && data.results && Object.keys(data.results).length > 0) {
+
+        let html = "<h2>Voting Results</h2>";
+        html += "<table><tr><th>Candidate</th><th>Votes</th></tr>";
+        // Try to show candidate names if available
+        let candidateMap = {};
+        if (Array.isArray(data.candidates)) {
+            data.candidates.forEach(c => {
+                candidateMap[c.id] = c.name ? c.name : c.id;
+            });
+        }
+        for (const [cid, votes] of Object.entries(data.results)) {
+            let label = candidateMap[cid] || cid;
+            html += `<tr><td>${label}</td><td>${votes}</td></tr>`;
+        }
+        html += "</table>";
+        document.getElementById("results-box").innerHTML = html;
+        document.getElementById("results-box").style.display = "";
+    } else {
+        document.getElementById("results-box").style.display = "none";
+    }
     // Countdown 
     if (typeof data.state !== "undefined" && typeof data.time_left !== "undefined") {
         startCountdown(data.state, data.time_left);
@@ -273,31 +316,37 @@ fetch('/api/board').then(r => r.json()).then(renderBoard);
 def index():
     return render_template_string(TEMPLATE)
 
-@app.route("/api/board")
+"""@app.route("/api/board")
 def api_board():
+    state = server_state.get_state()
+    results = {}
+    if state == "ENDED":
+        from .handler import count_votes
+        results = count_votes(commits, reveals, "server/cert.pem")
     return jsonify({
         "candidates": candidates,
         "voters": voters,
         "eligibility_requests": eligibility_requests,
         "commits": commits,
         "reveals": reveals,
-        "state": server_state.get_state(),
+        "state": state,
         "time_left": int(server_state.get_state_time_left()),
+        "results": results,
     })
-
-def broadcast_board():
+"""
+def broadcast_board(server_state):
+    state = server_state.get_state()
+    results = {}
+    if state == "ENDED":
+        from .handler import count_votes
+        results = count_votes(commits, reveals, "server/cert.pem")
     socketio.emit('update', {
         "candidates": candidates,
         "voters": voters,
         "eligibility_requests": eligibility_requests,
         "commits": commits,
         "reveals": reveals,
-        "state": server_state.get_state(),
+        "state": state,
         "time_left": int(server_state.get_state_time_left()),
+        "results": results,
     })
-
-
-def periodic_broadcast():
-    while True:
-        broadcast_board()
-        time.sleep(1)  
