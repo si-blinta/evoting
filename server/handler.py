@@ -1,6 +1,6 @@
 import logging
 from .data import candidates, voters, eligibility_requests, commits, confidential_voters, reveals
-from .state import ServerState, COMMIT, REVEAL, ENDED
+from .state import ServerState, COMMIT, REVEAL, ENDED,ELLIGIBILITY
 from cryptography.hazmat.primitives import serialization
 from cryptography import x509
 from cryptography.hazmat.backends import default_backend
@@ -8,7 +8,6 @@ import hashlib
 from Crypto.PublicKey import RSA
 from Crypto.Signature import pkcs1_15
 from Crypto.Hash import SHA256
-from .bulletin import broadcast_board
 # --- Logging setup ---
 logging.basicConfig(
     level=logging.INFO,
@@ -67,31 +66,28 @@ def handle_client(conn, addr, server_state: ServerState):
                 response = f"Commits: {commits}\n"
             elif packet == "LR":
                 response = f"Reveals: {reveals}\n"
-            elif packet == "COUNT":
+            elif packet == "COUNT": # todo THIS IS A PLACEHOLDER FOR NOW
                 results = count_votes(commits, reveals, "server/cert.pem")
                 logger.info(f"Vote count results: {results}")
                 response = f"Vote counts: {results}\n"
             else:
                 state = server_state.get_state()
-                # State-specific packet handling
+
                 if packet.startswith("E|"):
-                    if state != COMMIT:
-                        response = "ERROR|Eligibility requests are only allowed in COMMIT state.\n"
+                    if state != ELLIGIBILITY:
+                        response = "ERROR|Eligibility requests are only allowed in ELLIGIBILITY state.\n"
                     else:
                         response = handle_eligibility_state(packet)
-                        broadcast_board()
                 elif packet.startswith("C|"):
                     if state != COMMIT:
                         response = "ERROR|Commit requests are only allowed in COMMIT state.\n"
                     else:
                         response = handle_commit_state(packet)
-                        broadcast_board()
                 elif packet.startswith("R|"):
                     if state != REVEAL:
                         response = "ERROR|Reveal requests are only allowed in REVEAL state.\n"
                     else:
                         response = handle_reveal_state(packet)
-                        broadcast_board()
                 elif state == ENDED:
                     response = "ERROR|Voting session ended. No further requests accepted.\n"
                 else:

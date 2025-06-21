@@ -1,5 +1,6 @@
 import eventlet
 eventlet.monkey_patch()
+from .bulletin import periodic_broadcast
 import socket
 import ssl
 import threading
@@ -16,6 +17,7 @@ def start_bulletin():
     socketio.run(app, host="0.0.0.0", port=5000)
 
 def main():
+    threading.Thread(target=periodic_broadcast, daemon=True).start()
     threading.Thread(target=start_bulletin, daemon=True).start()
     print("Bulletin board running at http://localhost:5000")
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

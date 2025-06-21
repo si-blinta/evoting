@@ -8,6 +8,7 @@ NUM_VOTES=10
 CAND_MIN=1
 CAND_MAX=5
 PASSPHRASE="testpass"
+WAIT_BEFORE_COMMIT=60  # seconds
 WAIT_BEFORE_REVEAL=60  # seconds
 WAIT_BEFORE_COUNT=1     # seconds
 WALLET_PREFIX="test/wallet"
@@ -31,6 +32,10 @@ for i in $(seq 1 $NUM_CLIENTS); do
     echo "Requesting eligibility for $WALLET (ID: $CLIENT_ID)"
     python3 -m client.main "$WALLET" elligibility --id "$CLIENT_ID"
 done
+
+echo
+echo "Waiting $WAIT_BEFORE_COMMIT seconds before commit..."
+sleep $WAIT_BEFORE_COMMIT
 
 echo
 echo "=== Each client makes $NUM_VOTES votes with random candidates ($CAND_MIN-$CAND_MAX) ==="

@@ -258,6 +258,8 @@ def mode_sign(wallet, signed_blinded_hex=None):
     signed_unblinded = (signed_blinded * r_inv) % server_n
     logger.info(f"Unblinded signature (hex): {hex(signed_unblinded)}")
     wallet.set_signed_pubkey(hex(signed_unblinded))
+    if "blinding_factor" in wallet.data:
+        del wallet.data["blinding_factor"]
     wallet.save()
     # Verify the server's signature on the public key hash
     assert verify_signed_pubkey(wallet), "Server signature on public key is invalid!"

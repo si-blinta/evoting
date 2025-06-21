@@ -1,8 +1,11 @@
 from flask import Flask, render_template_string, jsonify
 from flask_socketio import SocketIO
-
+import threading
+import time
 from .data import candidates, voters, eligibility_requests, commits, reveals
+from .state import ServerState
 
+server_state = ServerState()
 app = Flask(__name__)
 socketio = SocketIO(app, async_mode='eventlet')
 
@@ -36,6 +39,7 @@ h1 { background: #2d5be3; color: #fff; margin: 0; padding: 24px 0; text-align: c
 </head>
 <body>
 <h1>Evoting Bulletin Board</h1>
+<div id="state-timer" style="text-align:center;font-size:1.3em;margin:18px 0 0 0;"></div>
 <div id="board"></div>
 <script>
 // Utility: copy to clipboard
@@ -125,9 +129,39 @@ function renderReveals(reveals) {
     return html;
 }
 
+let timerInterval = null;
+let lastTimeLeft = 0;
+let lastState = "";
+
+function startCountdown(state, timeLeft) {
+    lastTimeLeft = timeLeft;
+    lastState = state;
+    function updateTimer() {
+        let mins = Math.floor(lastTimeLeft / 60);
+        let secs = lastTimeLeft % 60;
+        let stateLabel = {
+            "ELLIGIBILITY": "Eligibility",
+            "COMMIT": "Commit",
+            "REVEAL": "Reveal",
+            "ENDED": "Ended"
+        }[lastState] || lastState;
+        let timerText = lastState === "ENDED"
+            ? `<span style="color:#c00;font-weight:bold;">Voting session ended</span>`
+            : `<span style="color:#2d5be3;font-weight:bold;">${stateLabel} state</span> &mdash; <span style="color:#222;">Time left: ${mins}:${secs.toString().padStart(2, "0")}</span>`;
+        document.getElementById("state-timer").innerHTML = timerText;
+        if (lastTimeLeft > 0 && lastState !== "ENDED") lastTimeLeft--;
+    }
+    if (timerInterval) clearInterval(timerInterval);
+    updateTimer();
+    timerInterval = setInterval(updateTimer, 1000);
+}
 
 function renderBoard(data) {
-    // 1. Capture current expanded states before re-rendering
+    // Countdown 
+    if (typeof data.state !== "undefined" && typeof data.time_left !== "undefined") {
+        startCountdown(data.state, data.time_left);
+        }
+    // Capture current expanded states before re-rendering
     expandedCommits.clear();
     document.querySelectorAll('.commit-card .commit-fields.active').forEach(fieldDiv => {
         const headerDiv = fieldDiv.previousElementSibling;
@@ -247,6 +281,8 @@ def api_board():
         "eligibility_requests": eligibility_requests,
         "commits": commits,
         "reveals": reveals,
+        "state": server_state.get_state(),
+        "time_left": int(server_state.get_state_time_left()),
     })
 
 def broadcast_board():
@@ -256,4 +292,12 @@ def broadcast_board():
         "eligibility_requests": eligibility_requests,
         "commits": commits,
         "reveals": reveals,
+        "state": server_state.get_state(),
+        "time_left": int(server_state.get_state_time_left()),
     })
+
+
+def periodic_broadcast():
+    while True:
+        broadcast_board()
+        time.sleep(1)  

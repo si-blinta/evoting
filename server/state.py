@@ -1,16 +1,18 @@
 import threading
 import time
 import logging
+ELLIGIBILITY = "ELLIGIBILITY"
 COMMIT = "COMMIT"
 REVEAL = "REVEAL"
 ENDED = "ENDED"
 
-STATE_SEQUENCE = [COMMIT, REVEAL, ENDED]
+STATE_SEQUENCE = [ELLIGIBILITY,COMMIT, REVEAL, ENDED]
 
 # Time (seconds) for each state
 STATE_DURATIONS = {
-    COMMIT: 60,       # 10 minute
-    REVEAL: 600,       # 10 minute
+    ELLIGIBILITY: 60,
+    COMMIT: 60,      
+    REVEAL: 600,       
 }
 
 # --- Logging setup ---
@@ -22,7 +24,7 @@ logger = logging.getLogger("server")
 
 class ServerState:
     def __init__(self):
-        self.state = COMMIT
+        self.state = ELLIGIBILITY
         self.lock = threading.Lock()
         self.state_start_time = time.time()
         self._start_state_timer()
