@@ -1,5 +1,5 @@
 import logging
-from .data import candidates, voters, eligibility_requests, commits, confidential_voters, reveals
+from .data import candidates, voters, eligibility_requests, commits, confidential_voters, reveals, processed_voter_ids
 from .state import ServerState, COMMIT, REVEAL, ENDED,ELLIGIBILITY
 from cryptography.hazmat.primitives import serialization
 from cryptography import x509
@@ -7,7 +7,7 @@ from cryptography.hazmat.backends import default_backend
 import hashlib
 from Crypto.PublicKey import RSA
 from Crypto.Hash import SHA256
-from collections import OrderedDict 
+from collections import OrderedDict
 # --- Logging setup ---
 logging.basicConfig(
     level=logging.INFO,
@@ -98,13 +98,16 @@ def handle_client(conn, addr, server_state: ServerState):
         conn.close()
 
 def handle_eligibility_state(packet):
-    
     try:
         _, user_id, blinded_pubkey = packet.split('|', 2)
+        if user_id in processed_voter_ids:
+            logger.warning(f"Duplicate eligibility request for ID: {user_id}")
+            return "ERROR|ID already used for eligibility request\n"
         voter_info = confidential_voters.get(user_id)
         if not voter_info:
             logger.warning(f"Eligibility request for unauthorized ID: {user_id}")
             return "ERROR|Non authorized ID\n"
+            
         blinded_bytes = bytes.fromhex(blinded_pubkey)
         signature = rsa_sign_raw(blinded_bytes, d, n)
         eligibility_requests.append({
@@ -112,12 +115,12 @@ def handle_eligibility_state(packet):
             'lastname': voter_info['lastname'],
             'birthdate': voter_info['birthdate']
         })
+        processed_voter_ids.add(user_id)
         logger.info(f"Eligibility granted for ID: {user_id}")
         return f"OK|{signature.hex()}\n"
     except Exception as e:
         logger.error(f"Eligibility request failed: {e}")
         return f"ERROR|Malformed packet or signing failed: {e}\n"
-    return "Command not allowed in ELIGIBILITY state.\n"
 
 def handle_commit_state(packet):
     commits.append(packet)
@@ -148,39 +151,32 @@ def verify_server_signature_from_packet(packet, cert_server_path):
 def verify_commit_signature_from_packet(packet):
     try:
         fields = packet.split("|")
-        if len(fields) < 6:
+        # New format: pubkey|signedpubkey|seq_hex|commit_hash_hex|signed_combined_hash_hex
+        if len(fields) < 5:
             return False
-        pubkey_hex = fields[0]
-        commit_hash_hex = fields[4]
-        signedhash_hex = fields[5]
-        modulus = int(pubkey_hex, 16)
-        exponent = 65537
-        public_key = RSA.construct((modulus, exponent))
-        signature_int = int(signedhash_hex, 16)
-        recovered_int = pow(signature_int, public_key.e, public_key.n)
-        expected_int = int(commit_hash_hex, 16)
-        return recovered_int == expected_int
-    except (ValueError, TypeError):
-        return False
 
-def verify_sequence_signature_from_packet(packet):
-    try:
-        fields = packet.split("|")
-        if len(fields) < 4:
-            return False
         pubkey_hex = fields[0]
-        seq_bytes_hex = fields[2]
-        signedseq_hex = fields[3]
+        seq_hex = fields[2]
+        commit_hash_hex = fields[3]
+        signed_combined_hash_hex = fields[4]
+
+        # Recreate the combined hash from the packet
+        commit_hash_bytes = bytes.fromhex(commit_hash_hex)
+        seq_bytes = bytes.fromhex(seq_hex)
+        combined_hash_bytes = hashlib.sha256(commit_hash_bytes + seq_bytes).digest()
+        expected_int = int.from_bytes(combined_hash_bytes, 'big')
+
+        # Verify the signature
         modulus = int(pubkey_hex, 16)
         exponent = 65537
         public_key = RSA.construct((modulus, exponent))
-        signature_int = int(signedseq_hex, 16)
+        signature_int = int(signed_combined_hash_hex, 16)
+
         recovered_int = pow(signature_int, public_key.e, public_key.n)
-        seq_bytes = bytes.fromhex(seq_bytes_hex)
-        seq_hash = SHA256.new(seq_bytes).digest()
-        expected_int = int.from_bytes(seq_hash, 'big')
+
         return recovered_int == expected_int
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, IndexError) as e:
+        logger.error(f"Error verifying commit signature: {e}")
         return False
 
 def verify_reveal_signature_from_packet(packet):
@@ -206,38 +202,44 @@ def count_votes(commits_list, reveal_list, cert_server_path):
     logger.info("Starting vote counting process.")
     if not commits_list or not reveal_list:
         candidate_id_to_name = {c['id']: f"{c['name']} {c['lastname']}" for c in candidates}
-        # Option 1: Return all candidates with 0 votes
         return {name: 0 for name in candidate_id_to_name.values()}
+
     valid_commits = {}  # Mapping: voter (pubkey_hex) -> (sequence, commit_packet)
     for idx, original_packet in enumerate(commits_list):
         logger.debug(f"Processing commit packet #{idx + 1}: {original_packet}")
         packet = original_packet[2:]  # Remove header
         logger.debug(f"Commit packet after header removal: {packet}")
+
         if not verify_server_signature_from_packet(packet, cert_server_path):
             logger.warning(f"Commit packet #{idx + 1}: Server signature verification failed.")
             continue
+
+        # The new function verifies the combined signature for commit and sequence
         if not verify_commit_signature_from_packet(packet):
-            logger.warning(f"Commit packet #{idx + 1}: Commit signature verification failed.")
+            logger.warning(f"Commit packet #{idx + 1}: Commit/sequence signature verification failed.")
             continue
-        if not verify_sequence_signature_from_packet(packet):
-            logger.warning(f"Commit packet #{idx + 1}: Sequence signature verification failed.")
-            continue
+
         fields = packet.split("|")
-        if len(fields) < 6:
+        # New structure has 5 fields after pubkey, signedpubkey
+        if len(fields) < 5:
             logger.warning(f"Commit packet #{idx + 1}: Insufficient fields ({len(fields)}). Skipping.")
             continue
+
         voter = fields[0]
         try:
-            seq = int(fields[2], 16)
+            # seq is now at index 2, and it's in hex
+            seq = int.from_bytes(bytes.fromhex(fields[2]), 'big')
             logger.debug(f"Commit packet #{idx + 1}: Voter: {voter}, Sequence: {seq}.")
         except ValueError:
             logger.warning(f"Commit packet #{idx + 1}: Invalid sequence value. Skipping.")
             continue
+
         if voter not in valid_commits or seq > valid_commits[voter][0]:
             logger.debug(f"Commit packet #{idx + 1}: Updating valid commit for voter {voter}.")
             valid_commits[voter] = (seq, packet)
         else:
             logger.debug(f"Commit packet #{idx + 1}: Not the highest sequence for voter {voter}.")
+
     vote_counts = {}
     valid_candidate_ids = {candidate['id'] for candidate in candidates}
     logger.debug(f"Valid candidate IDs: {valid_candidate_ids}")
@@ -250,19 +252,23 @@ def count_votes(commits_list, reveal_list, cert_server_path):
         if len(fields) < 5:
             logger.warning(f"Reveal packet #{idx + 1}: Insufficient fields ({len(fields)}). Skipping.")
             continue
+
         voter = fields[0]
         if voter in revealed_voters:
             logger.info(f"Reveal packet #{idx + 1}: Voter {voter} already had a valid reveal counted. Skipping.")
             continue
+
         candidate_bytes_hex = fields[2]
         salt_hex = fields[3]
         logger.debug(f"Reveal packet #{idx + 1}: Voter: {voter}, Candidate Hex: {candidate_bytes_hex}, Salt Hex: {salt_hex}.")
         if not verify_reveal_signature_from_packet(packet):
             logger.warning(f"Reveal packet #{idx + 1}: Reveal signature verification failed.")
             continue
+
         if voter not in valid_commits:
             logger.warning(f"Reveal packet #{idx + 1}: No valid commit found for voter {voter}.")
             continue
+
         try:
             candidate_bytes = bytes.fromhex(candidate_bytes_hex)
             salt_bytes = bytes.fromhex(salt_hex)
@@ -270,17 +276,22 @@ def count_votes(commits_list, reveal_list, cert_server_path):
         except Exception as e:
             logger.warning(f"Reveal packet #{idx + 1}: Conversion error: {e}. Skipping.")
             continue
+
         computed_hash = hashlib.sha256(candidate_bytes + salt_bytes).hexdigest()
         logger.debug(f"Reveal packet #{idx + 1}: Computed hash: {computed_hash}")
         commit_fields = valid_commits[voter][1].split("|")
-        if len(commit_fields) < 6:
+
+        if len(commit_fields) < 5:
             logger.warning(f"Reveal packet #{idx + 1}: Valid commit for voter {voter} has insufficient fields. Skipping.")
             continue
-        commit_hash_hex = commit_fields[4]
+
+        # The commit_hash is now at index 3 in the commit packet
+        commit_hash_hex = commit_fields[3]
         logger.debug(f"Reveal packet #{idx + 1}: Commit hash from commit packet: {commit_hash_hex}")
         if computed_hash != commit_hash_hex:
             logger.warning(f"Reveal packet #{idx + 1}: Hash mismatch. Computed: {computed_hash}, Expected: {commit_hash_hex}. Skipping.")
             continue
+
         try:
             candidate_id = int(candidate_bytes_hex, 16)
             logger.debug(f"Reveal packet #{idx + 1}: Candidate ID (integer): {candidate_id}")
@@ -290,9 +301,11 @@ def count_votes(commits_list, reveal_list, cert_server_path):
         if candidate_id not in valid_candidate_ids:
             logger.warning(f"Reveal packet #{idx + 1}: Candidate ID {candidate_id} not in valid candidates. Skipping.")
             continue
+
         vote_counts[candidate_id] = vote_counts.get(candidate_id, 0) + 1
         revealed_voters.add(voter)
         logger.info(f"Reveal packet #{idx + 1}: Vote counted for candidate {candidate_id}. Total now: {vote_counts[candidate_id]}")
+
     logger.info(f"Final vote counts: {vote_counts}")
     candidate_id_to_name = {c['id']: f"{c['name']} {c['lastname']}" for c in candidates}
     sorted_items = sorted(
@@ -302,4 +315,3 @@ def count_votes(commits_list, reveal_list, cert_server_path):
     )
     result_with_names = {name: count for name, count in sorted_items}
     return result_with_names
-    

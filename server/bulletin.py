@@ -82,10 +82,10 @@ function renderCommits(commits) {
     if (!Array.isArray(commits) || commits.length === 0)
         return "<div class='json-list'>No commits</div>";
 
-    // Field labels for commits based on: pubkey|signedpubkey|seq|signedseq|commithash|signedcommithash
+    // New field labels for commits
     const commitLabels = [
-        "PubKey (hex)", "SignedPubKey (hex)", "Sequence (hex)", "SignedSequence (hex)",
-        "CommitHash (hex)", "SignedCommitHash (hex)"
+        "PubKey (hex)", "SignedPubKey (hex)", "Sequence (hex)",
+        "CommitHash (hex)", "SignedCommitSequenceHash (hex)"
     ];
 
     let html = "<ul class='commit-list'>";
@@ -187,12 +187,11 @@ if (data.state === "ENDED" && data.results && Object.keys(data.results).length >
         let candidateMap = {};
         if (Array.isArray(data.candidates)) {
             data.candidates.forEach(c => {
-                candidateMap[c.id] = c.name ? c.name : c.id;
+                candidateMap[c.id] = c.name ? c.name + " " + c.lastname : c.id;
             });
         }
-        for (const [cid, votes] of Object.entries(data.results)) {
-            let label = candidateMap[cid] || cid;
-            html += `<tr><td>${label}</td><td>${votes}</td></tr>`;
+        for (const [name, votes] of Object.entries(data.results)) {
+            html += `<tr><td>${name}</td><td>${votes}</td></tr>`;
         }
         html += "</table>";
         document.getElementById("results-box").innerHTML = html;
@@ -200,7 +199,7 @@ if (data.state === "ENDED" && data.results && Object.keys(data.results).length >
     } else {
         document.getElementById("results-box").style.display = "none";
     }
-    // Countdown 
+    // Countdown
     if (typeof data.state !== "undefined" && typeof data.time_left !== "undefined") {
         startCountdown(data.state, data.time_left);
         }

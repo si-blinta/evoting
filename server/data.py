@@ -37,3 +37,4 @@ confidential_voters = {
 eligibility_requests = []
 commits = []
 reveals = []
+processed_voter_ids = set()

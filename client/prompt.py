@@ -40,17 +40,22 @@ def get_commit_data(wallet_path):
     wallet.load()
     try:
         seq = wallet.get_sequence()
-        candidate = wallet.get_candidate()
-        if seq is None or candidate is None:
-            print("You must run the commit step to set candidate and sequence in your wallet first.")
+        commit_hash = wallet.get_commit_hash()
+        signed_hash = wallet.get_signed_commit_sequence_hash()
+
+        if not all([wallet.get_public_key(), wallet.get_signed_pubkey(), seq is not None, commit_hash, signed_hash]):
+            print("Wallet is not fully prepared for commit. Please run the commit step.")
             return None
+
+        # The sequence needs to be sent as hex
+        seq_hex = seq.to_bytes((seq.bit_length() + 7) // 8 or 1, 'big').hex()
+
         packet = "|".join([
             strip0x(wallet.get_public_key()),
             strip0x(wallet.get_signed_pubkey()),
-            seq.to_bytes((seq.bit_length() + 7) // 8 or 1, 'big').hex(),
-            strip0x(wallet.get_signed_sequence()),
-            strip0x(wallet.get_commit_hash()),
-            strip0x(wallet.get_signed_commit_hash())
+            seq_hex,
+            strip0x(commit_hash),
+            strip0x(signed_hash)
         ])
         return packet
     except Exception as e:

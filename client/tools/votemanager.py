@@ -62,7 +62,7 @@ def get_salt_from_passphrase(passphrase):
         passphrase.encode('utf-8'),
         pbkdf2_salt,
         100_000,
-        dklen=16 
+        dklen=16
     )
     return salt_bytes
 
@@ -76,8 +76,9 @@ class Wallet:
             json.dump(self.data, f, indent=2)
 
     def load(self):
-        with open(self.path, "r") as f:
-            self.data = json.load(f)
+        if os.path.exists(self.path):
+            with open(self.path, "r") as f:
+                self.data = json.load(f)
 
     def set(self, key, value):
         self.data[key] = value
@@ -121,11 +122,8 @@ class Wallet:
     def get_sequence(self):
         return self.data.get("sequence", None)
 
-    def set_signed_sequence(self, sig_hex):
-        self.set("signed_sequence", sig_hex)
-
-    def get_signed_sequence(self):
-        return self.get("signed_sequence")
+    def get_signed_commit_sequence_hash(self):
+        return self.get("signed_commit_sequence_hash")
 
     def set_commit_hash(self, hash_hex):
         self.set("commit_hash", hash_hex)
@@ -133,11 +131,8 @@ class Wallet:
     def get_commit_hash(self):
         return self.get("commit_hash")
 
-    def set_signed_commit_hash(self, sig_hex):
-        self.set("signed_commit_hash", sig_hex)
-
-    def get_signed_commit_hash(self):
-        return self.get("signed_commit_hash")
+    def set_signed_commit_sequence_hash(self, sig_hex):
+        self.set("signed_commit_sequence_hash", sig_hex)
 
     # For blinding/unblinding
     def set_blinding_factor(self, r):
@@ -191,19 +186,23 @@ def verify_reveal_signature_from_wallet(wallet):
 def verify_commit_signature_from_wallet(wallet):
     pubkey_hex = wallet.get_public_key()
     pubkey_n = int(pubkey_hex, 16)
-    # Sequence signature
     seq = wallet.get_sequence()
+    commit_hash_hex = wallet.get_commit_hash()
+    signed_combined_hash_hex = wallet.get('signed_commit_sequence_hash')
+
+    if not all([pubkey_hex, seq is not None, commit_hash_hex, signed_combined_hash_hex]):
+        logger.error("Missing data in wallet for commit verification.")
+        return False
+
+    # Recreate the combined hash
+    commit_hash_bytes = bytes.fromhex(commit_hash_hex)
     seq_bytes = seq.to_bytes((seq.bit_length() + 7) // 8 or 1, 'big')
-    seq_hash = hashlib.sha256(seq_bytes).digest()
-    signed_seq = wallet.get_signed_sequence()
-    valid_seq = verify_signature(seq_hash, signed_seq, pubkey_n)
-    # Commit hash signature
-    commit_hash = wallet.get_commit_hash()
-    signed_commit_hash = wallet.get_signed_commit_hash()
-    valid_commit = verify_signature(bytes.fromhex(commit_hash), signed_commit_hash, pubkey_n)
-    logger.info(f"Sequence signature verification: {valid_seq}")
-    logger.info(f"Commit hash signature verification: {valid_commit}")
-    return valid_seq and valid_commit
+    combined_hash_bytes = hashlib.sha256(commit_hash_bytes + seq_bytes).digest()
+
+    # Verify the signature
+    is_valid = verify_signature(combined_hash_bytes, signed_combined_hash_hex, pubkey_n)
+    logger.info(f"Combined commit/sequence signature verification: {is_valid}")
+    return is_valid
 
 def verify_signed_pubkey(wallet):
     # This checks the server's signature on the public key hash
@@ -225,17 +224,14 @@ def verify_signed_pubkey(wallet):
     return valid
 
 def mode_init(wallet, passphrase=None):
-    # Generate keys and blinded pubkey
     server_n, server_e = load_server_pubkey("client/cert.pem")
     key = RSA.generate(2048)
     pubkey = key.publickey()
     pubkey_hex = hex(pubkey.n)
     wallet.set_private_key(key.export_key(pkcs=8, protection="scryptAndAES128-CBC"))
     wallet.set_public_key(pubkey_hex)
-
     if passphrase is None:
         passphrase = getpass.getpass("Enter a passphrase for blinding: ")
-    
     pubkey_bytes = pubkey.n.to_bytes((pubkey.n.bit_length() + 7) // 8, 'big')
     pubkey_hash = int.from_bytes(hashlib.sha256(pubkey_bytes).digest(), 'big')
     r = generate_r_from_passphrase(passphrase, server_n)
@@ -253,6 +249,9 @@ def mode_sign(wallet, signed_blinded_hex=None):
     wallet.load()
     server_n, _ = load_server_pubkey("client/cert.pem")
     r = wallet.get_blinding_factor()
+    if r is None:
+        logger.error("No blinding factor in wallet. Already signed?")
+        return
     blinded = int(wallet.get_blinded_hash(), 16)
     if signed_blinded_hex is None:
         signed_blinded_hex = input("Paste the server's signature on the blinded hash (hex): ")
@@ -274,36 +273,47 @@ def mode_commit(wallet, candidate=None, passphrase=None):
         candidate = int(input("Enter candidate (integer): ").strip())
     if passphrase is None:
         passphrase = input("Enter passphrase for salt: ").strip()
+
     # Sequence management
     seq = wallet.get_sequence()
-    if seq is None:
-        seq = 1
-    else:
-        seq = int(seq) + 1
+    seq = 1 if seq is None else int(seq) + 1
     logger.info(f"Using sequence number: {seq}")
+
     salt_bytes = get_salt_from_passphrase(passphrase)
     salt_hex = salt_bytes.hex()
     wallet.set_candidate(candidate)
     wallet.set_sequence(seq)
     wallet.set_salt(salt_hex)
 
-    seq_bytes = seq.to_bytes((seq.bit_length() + 7) // 8 or 1, 'big')
-    seq_hash = hashlib.sha256(seq_bytes).digest()
-    signedseq_hex = sign_with_private_key(seq_hash, wallet.get_private_key_bytes())
-
+    # Create commit hash
     candidate_bytes = candidate.to_bytes((candidate.bit_length() + 7) // 8 or 1, 'big')
-    hash_bytes = hashlib.sha256(candidate_bytes + salt_bytes).digest()
-    hash_hex = hash_bytes.hex()
-    signedhash_hex = sign_with_private_key(hash_bytes, wallet.get_private_key_bytes())
+    commit_hash_bytes = hashlib.sha256(candidate_bytes + salt_bytes).digest()
+    commit_hash_hex = commit_hash_bytes.hex()
 
-    wallet.set_signed_sequence(signedseq_hex)
-    wallet.set_commit_hash(hash_hex)
-    wallet.set_signed_commit_hash(signedhash_hex)
+    # Create combined hash of commit and sequence
+    seq_bytes = seq.to_bytes((seq.bit_length() + 7) // 8 or 1, 'big')
+    combined_hash_bytes = hashlib.sha256(commit_hash_bytes + seq_bytes).digest()
+
+    # Sign the combined hash
+    signed_combined_hash_hex = sign_with_private_key(combined_hash_bytes, wallet.get_private_key_bytes())
+
+    # Update wallet
+    wallet.set_commit_hash(commit_hash_hex)
+    wallet.set_signed_commit_sequence_hash(signed_combined_hash_hex)
+
+    # Remove old fields if they exist to avoid confusion
+    if wallet.get('signed_sequence'):
+        del wallet.data['signed_sequence']
+    if wallet.get('signed_commit_hash'):
+        del wallet.data['signed_commit_hash']
+
     wallet.save()
-    # Verify signatures
-    assert verify_commit_signature_from_wallet(wallet), "Commit or sequence signature is invalid!"
-    logger.info("Commit and sequence signatures are valid.")
+
+    # Verify signature
+    assert verify_commit_signature_from_wallet(wallet), "Combined commit/sequence signature is invalid!"
+    logger.info("Combined commit/sequence signature is valid.")
     logger.info(f"Commit stored in wallet : {wallet.path}")
+
 
 def main():
     import sys
@@ -321,6 +331,7 @@ def main():
     elif args.mode == "commit":
         mode_commit(wallet, candidate=args.candidate, passphrase=args.passphrase)
     elif args.mode == "sign":
+        wallet.load()
         mode_sign(wallet, signed_blinded_hex=args.signed_blinded)
     else:
         logger.error("Unknown mode.")
