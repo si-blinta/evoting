@@ -51,7 +51,7 @@ def handle_client(conn, addr, server_state: ServerState):
             if not data:
                 break
             packet = data.decode().strip()
-            logger.info(f"[client {addr[0]}:{addr[1]}] {packet}")
+            logger.debug(f"[client {addr[0]}:{addr[1]}] {packet}")
 
             response = None  # Default to None, set below
 
@@ -94,7 +94,7 @@ def handle_client(conn, addr, server_state: ServerState):
 
             conn.sendall(response.encode())
     finally:
-        logger.info(f"Connection with {addr[0]}:{addr[1]} closed.")
+        logger.debug(f"Connection with {addr[0]}:{addr[1]} closed.")
         conn.close()
 
 def handle_eligibility_state(packet):

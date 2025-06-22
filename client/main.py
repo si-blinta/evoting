@@ -79,7 +79,7 @@ def main():
                         logger.warning("Server closed the connection.")
                         return
                     response_text = response.decode().strip()
-                    logger.info(f"Server response: {response_text}")
+                    logger.debug(f"Server response: {response_text}")
                     # Handle eligibility auto-sign
                     if cmd == "elligibility" and response_text.startswith("OK"):
                         parts = response_text.strip().split("|", 1)

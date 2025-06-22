@@ -220,7 +220,7 @@ def verify_signed_pubkey(wallet):
     server_n, server_e = load_server_pubkey("client/cert.pem")
     recovered = pow(signed_pubkey, server_e, server_n)
     valid = recovered == pubkey_hash
-    logger.info(f"Signed public key verification: {valid}")
+    logger.debug(f"Signed public key verification: {valid}")
     return valid
 
 def mode_init(wallet, passphrase=None):
@@ -239,7 +239,7 @@ def mode_init(wallet, passphrase=None):
     byte_len = (server_n.bit_length() + 7) // 8
     hex_len = byte_len * 2
     blinded_hex = f'{blinded:0{hex_len}x}'
-    logger.info(f"Blinded hash of RSA Public Key (hex): {blinded_hex}")
+    logger.debug(f"Blinded hash of RSA Public Key (hex): {blinded_hex}")
     wallet.set_blinding_factor(r)
     wallet.set_blinded_hash(blinded_hex)
     wallet.save()
@@ -258,7 +258,7 @@ def mode_sign(wallet, signed_blinded_hex=None):
     signed_blinded = int(signed_blinded_hex.strip(), 16)
     r_inv = pow(r, -1, server_n)
     signed_unblinded = (signed_blinded * r_inv) % server_n
-    logger.info(f"Unblinded signature (hex): {hex(signed_unblinded)}")
+    logger.debug(f"Unblinded signature (hex): {hex(signed_unblinded)}")
     wallet.set_signed_pubkey(hex(signed_unblinded))
     if "blinding_factor" in wallet.data:
         del wallet.data["blinding_factor"]
