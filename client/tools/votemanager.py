@@ -235,14 +235,17 @@ def mode_init(wallet, passphrase=None):
 
     if passphrase is None:
         passphrase = getpass.getpass("Enter a passphrase for blinding: ")
+    
     pubkey_bytes = pubkey.n.to_bytes((pubkey.n.bit_length() + 7) // 8, 'big')
     pubkey_hash = int.from_bytes(hashlib.sha256(pubkey_bytes).digest(), 'big')
     r = generate_r_from_passphrase(passphrase, server_n)
     blinded = (pubkey_hash * pow(r, server_e, server_n)) % server_n
-
-    logger.info(f"Blinded hash of RSA Public Key (hex): {hex(blinded)}")
+    byte_len = (server_n.bit_length() + 7) // 8
+    hex_len = byte_len * 2
+    blinded_hex = f'{blinded:0{hex_len}x}'
+    logger.info(f"Blinded hash of RSA Public Key (hex): {blinded_hex}")
     wallet.set_blinding_factor(r)
-    wallet.set_blinded_hash(hex(blinded))
+    wallet.set_blinded_hash(blinded_hex)
     wallet.save()
     logger.info(f"Wallet initialized and saved to {wallet.path}")
 
