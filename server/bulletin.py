@@ -349,3 +349,11 @@ def broadcast_board(server_state):
         "time_left": int(server_state.get_state_time_left()),
         "results": results,
     })
+
+@app.route("/api/export")
+def api_export():
+    return jsonify({
+        "candidates": candidates,
+        "commits": commits,
+        "reveals": reveals,
+    })
