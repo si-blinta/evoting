@@ -2,7 +2,7 @@ import sys
 import socket
 import ssl
 import logging
-from .prompt import get_user_message, print_help, get_elligibility_data, get_commit_data, get_reveal_data, strip0x
+from .prompt import get_user_message, print_help, get_commit_data, get_reveal_data, strip0x
 from client.tools.votemanager import Wallet, mode_sign
 
 # --- Logging setup ---
@@ -21,8 +21,7 @@ COMMAND_PACKET_MAP = {
     "voters_list": "LV",
     "eligibility_list": "LE",
     "commits_list": "LM",
-    "reveal_list": "LR",
-    "count": "COUNT"
+    "reveal_list": "LR"
 }
 
 def main():
@@ -49,7 +48,7 @@ def main():
                 logger.warning("Could not build commit packet from wallet.")
                 return
             packet = f"C|{commit_packet}"
-        elif cmd == "elligibility":
+        elif cmd == "eligibility":
             # Support --id argument
             user_id = None
             for i, opt in enumerate(options):
@@ -81,7 +80,7 @@ def main():
                     response_text = response.decode().strip()
                     logger.debug(f"Server response: {response_text}")
                     # Handle eligibility auto-sign
-                    if cmd == "elligibility" and response_text.startswith("OK"):
+                    if cmd == "eligibility" and response_text.startswith("OK"):
                         parts = response_text.strip().split("|", 1)
                         if len(parts) == 2:
                             signed_blinded_hex = parts[1].strip()
@@ -152,7 +151,7 @@ def main():
                             break
                         continue
 
-                    if message.lower() == "elligibility":
+                    if message.lower() == "eligibility":
                         user_id = input("Enter your ID: ").strip()
                         wallet = Wallet(wallet_path)
                         wallet.load()

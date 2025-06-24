@@ -4,7 +4,7 @@ def print_help():
     print("""
 Available commands:
   help                Show this help message
-  elligibility        Request eligibility signature (requires ID and blinded pubkey)
+  eligibility        Request eligibility signature (requires ID and blinded pubkey)
   candidate_list      Request the list of candidates from server
   voters_list         Request the list of voters from server
   eligibility_list    Request the list of eligibility requests from server
@@ -25,7 +25,7 @@ def get_user_message():
 def strip0x(s):
     return s[2:] if isinstance(s, str) and s.startswith("0x") else s
 
-def get_elligibility_data(wallet_path):
+def get_eligibility_data(wallet_path):
     wallet = Wallet(wallet_path)
     wallet.load()
     user_id = input("Enter your ID: ").strip()

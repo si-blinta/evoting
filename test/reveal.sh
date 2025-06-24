@@ -3,7 +3,7 @@
 set -e
 
 # ==== CONFIGURABLE VARIABLES ====
-NUM_CLIENTS=9
+NUM_CLIENTS=4
 WALLET_PREFIX="test/wallet"
 # ================================
 

@@ -248,7 +248,7 @@ if (data.state === "ENDED" && data.results && Object.keys(data.results).length >
     html += "</div>";
 
     // Eligibility Requests
-    html += "<div class='card'><h2>Eligibility Requests</h2>";
+    html += "<div class='card'><h2>Eligible Voters</h2>";
     if (Array.isArray(data.eligibility_requests) && data.eligibility_requests.length > 0) {
         let cols = Object.keys(data.eligibility_requests[0]);
         html += "<table><tr>" + cols.map(col => "<th>" + col + "</th>").join("") + "</tr>";
