@@ -2,42 +2,65 @@
 
 ## Installation
 
+Clone the repository and set up a virtual environment:
+
 ```bash
 git clone https://github.com/si-blinta/evoting.git
 cd evoting/
-python3 -m venv venv/
-. venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
+
 ## Running
-### Running the server
+
+### Start the Server
 
 ```bash
 python3 -m server.main
 ```
-### Running the simulation
+
+### Run the Simulation
+
 ```bash
-#eligibility phase:
+# Eligibility phase:
 test/eligibility.sh
-#commit phase:
+
+# Commit phase:
 test/commit.sh
-#reveal phase
+
+# Reveal phase:
 test/reveal.sh
 ```
-### Commands
-```bash
-#initialize wallet:
-python3 -m client.tools.votemanager <wallet> init --passphrase <passphrase>
-#Send eligibility request to the server
-python3 -m client.main <wallet> eligibility --id <id>
-#Load a commit into a wallet:
-python3 -m client.tools.votemanager <wallet> commit --candidate <candidate> --passphrase <passphrase>
-#send commit request to the server
-python3 -m client.main <wallet> commit
-#send reveal to the server
-python3 -m client.main <> reveal
-```
-## Config
-Candidates,Voters ID ... are in server/data.py
 
-For debug, modify logger level INFO -> DEBUG to see the packets
+### Common Commands
+
+```bash
+# Initialize a wallet:
+python3 -m client.tools.votemanager <wallet> init --passphrase <passphrase>
+
+# Send eligibility request to the server:
+python3 -m client.main <wallet> eligibility --id <id>
+
+# Load a commit into a wallet:
+python3 -m client.tools.votemanager <wallet> commit --candidate <candidate> --passphrase <passphrase>
+
+# Send commit request to the server:
+python3 -m client.main <wallet> commit
+
+# Send reveal to the server:
+python3 -m client.main <wallet> reveal
+
+# Do the tallying locally 
+
+python3 -m client.tools.votemanager count --server-url http://localhost:5000
+
+# You can use interactive mode by not using the -- flags
+
+```
+
+## Configuration
+
+- Candidates and voter IDs are defined in `server/data.py`.
+- To adjust phase durations, edit `server/state.py`.
+- For debugging, set the logger level from `INFO` to `DEBUG` to view packet details.
